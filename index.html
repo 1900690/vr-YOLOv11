@@ -3,17 +3,159 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YOLOv11 Web Scanner</title>
-    <link rel="stylesheet" href="style.css">
-    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <title>Object Detection App (Boxer Style)</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f2f5;
+            color: #1c1e21;
+        }
+        header {
+            width: 100%;
+            padding: 20px;
+            background-color: #ffffff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .container {
+            position: relative;
+            width: fit-content;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        video, canvas {
+            display: block;
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            background-color: #1877f2;
+            color: white;
+            font-weight: bold;
+            transition: background 0.3s;
+        }
+        button:hover { background-color: #166fe5; }
+        button:disabled { background-color: #ccc; }
+        #status { margin-top: 10px; font-weight: bold; color: #65676b; }
+    </style>
 </head>
 <body>
-    <div id="container">
-        <video id="webcam" autoplay playsinline></video>
-        <canvas id="overlay"></canvas>
-    </div>
-    <div id="status">モデルを読み込み中...</div>
 
-    <script src="main.js"></script>
+<header>
+    <h1>Boxer-lite: Object Detection</h1>
+    <p>ブラウザ上で動作するリアルタイム物体検出</p>
+</header>
+
+<div class="container">
+    <video id="webcam" autoplay playsinline muted width="640" height="480"></video>
+    <canvas id="overlay"></canvas>
+</div>
+
+<div class="controls">
+    <button id="startBtn">カメラ起動</button>
+</div>
+<div id="status">モデル読み込み中...</div>
+
+<script>
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('overlay');
+    const status = document.getElementById('status');
+    const startBtn = document.getElementById('startBtn');
+    const ctx = canvas.getContext('2d');
+
+    let model;
+
+    // モデルのロード
+    async function loadModel() {
+        model = await cocoSsd.load();
+        status.innerText = "モデル読み込み完了！カメラを許可して開始してください。";
+    }
+
+    // カメラのセットアップ
+    async function setupWebcam() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 640, height: 480 },
+                audio: false
+            });
+            video.srcObject = stream;
+            return new Promise((resolve) => {
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    resolve();
+                };
+            });
+        } catch (e) {
+            status.innerText = "エラー: カメラにアクセスできません。";
+            console.error(e);
+        }
+    }
+
+    // 検出ループ
+    async function detectFrame() {
+        const predictions = await model.detect(video);
+        
+        // 描画のクリア
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // 結果の描画 (Boxer風のスタイル)
+        predictions.forEach(prediction => {
+            const [x, y, width, height] = prediction.bbox;
+            const label = prediction.class;
+            const score = (prediction.score * 100).toFixed(1);
+
+            // 枠の描画
+            ctx.strokeStyle = '#00FF00';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(x, y, width, height);
+
+            // ラベルの背景描画
+            ctx.fillStyle = '#00FF00';
+            const textWidth = ctx.measureText(`${label} ${score}%`).width;
+            ctx.fillRect(x, y - 25, textWidth + 10, 25);
+
+            // テキストの描画
+            ctx.fillStyle = '#000000';
+            ctx.font = '18px sans-serif';
+            ctx.fillText(`${label} ${score}%`, x + 5, y - 7);
+        });
+
+        requestAnimationFrame(detectFrame);
+    }
+
+    startBtn.addEventListener('click', async () => {
+        startBtn.disabled = true;
+        status.innerText = "カメラ起動中...";
+        await setupWebcam();
+        status.innerText = "検出中...";
+        detectFrame();
+    });
+
+    loadModel();
+</script>
+
 </body>
 </html>
