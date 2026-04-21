@@ -34,7 +34,7 @@ import * as THREE from 'three';
 import * as xb from 'xrblocks';
 import * as ort from 'onnxruntime-web';
 
-// Ensure WebAssembly binaries can be found correctly via CDN
+// WebAssemblyのバイナリがCDNから正しく読み込まれるようにパスを設定
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/';
 
 const YOLO_CLASSES = [
@@ -51,8 +51,8 @@ const YOLO_CLASSES = [
 ];
 
 /**
- * An XR Blocks app that renders a virtual heads-up display (HUD) showing
- * the device camera feed overlaid with YOLOv11 ONNX object detection boxes.
+ * デバイスのカメラ映像を取得し、YOLOv11 ONNXモデルによる物体検出結果の
+ * バウンディングボックスを重ねてXR空間上に表示するアプリです。
  */
 class YOLOv11App extends xb.Script {
   constructor() {
@@ -63,13 +63,13 @@ class YOLOv11App extends xb.Script {
     this.boxes = [];
     this.displaySize = 640;
 
-    // Create an offscreen canvas for feeding the ONNX model
+    // ONNXモデルに渡すためのオフスクリーンキャンバス
     this.offscreenCanvas = document.createElement('canvas');
     this.offscreenCanvas.width = this.displaySize;
     this.offscreenCanvas.height = this.displaySize;
     this.offCtx = this.offscreenCanvas.getContext('2d', { willReadFrequently: true });
 
-    // Create a display canvas that serves as the texture for our HUD mesh
+    // ユーザーに表示するテクスチャ用のキャンバス
     this.displayCanvas = document.createElement('canvas');
     this.displayCanvas.width = this.displaySize;
     this.displayCanvas.height = this.displaySize;
@@ -78,7 +78,7 @@ class YOLOv11App extends xb.Script {
     this.displayTexture = new THREE.CanvasTexture(this.displayCanvas);
     this.displayTexture.colorSpace = THREE.SRGBColorSpace;
 
-    // Create a hidden video element to capture the camera stream
+    // カメラストリームを取得するための隠しvideo要素
     this.video = document.createElement('video');
     this.video.setAttribute('autoplay', '');
     this.video.setAttribute('muted', '');
@@ -86,14 +86,14 @@ class YOLOv11App extends xb.Script {
     this.video.style.display = 'none';
     document.body.appendChild(this.video);
 
-    // Preallocate Float32Array to avoid constant garbage collection
+    // ガベージコレクションを防ぐため、事前にFloat32Arrayを確保
     this.floatData = new Float32Array(3 * this.displaySize * this.displaySize);
   }
 
   async init() {
     this.add(new THREE.HemisphereLight(0xffffff, 0x666666, 3));
 
-    // Create a spatial panel for displaying status updates
+    // ステータス更新を表示するための空間パネルを作成
     this.panel = new xb.SpatialPanel({
       width: 1.5,
       height: 0.2,
@@ -110,7 +110,7 @@ class YOLOv11App extends xb.Script {
       fontSize: 0.08,
     });
 
-    // Create the HUD screen displaying the camera and bounding boxes
+    // カメラ映像とバウンディングボックスを表示するHUDメッシュを作成
     const geometry = new THREE.PlaneGeometry(1.5, 1.5);
     const material = new THREE.MeshBasicMaterial({ 
         map: this.displayTexture, 
@@ -120,7 +120,7 @@ class YOLOv11App extends xb.Script {
     this.displayMesh.position.set(0, 1.2, -1.5);
     this.add(this.displayMesh);
 
-    // Connect the XR Blocks camera stream to our video element
+    // XR Blocksのカメラストリームをvideo要素に接続
     this.cameraStream = xb.core.deviceCamera;
     this.cameraStream.addEventListener('statechange', (event) => {
       if (event.state === 'streaming') {
@@ -129,13 +129,18 @@ class YOLOv11App extends xb.Script {
       }
     });
 
-    // Load the ONNX model uploaded by the user
+    // init() をブロックしないように、モデルのロードは非同期のまま実行だけ開始する
+    this.loadModel();
+  }
+
+  async loadModel() {
     try {
       this.statusText.setText('Loading YOLOv11 ONNX model...');
-      this.session = await ort.InferenceSession.create('./yolo11n.onnx', { 
+      // ユーザーがアップロードしたONNXモデルの読み込み
+      this.session = await ort.InferenceSession.create('yolo11n.onnx', { 
         executionProviders: ['wasm'] 
       });
-      this.statusText.setText('Model Ready! Waiting for frames...');
+      this.statusText.setText('Model Ready! Waiting for camera...');
     } catch (error) {
       console.error('Model load error:', error);
       this.statusText.setText('Failed to load ONNX model.');
@@ -143,14 +148,17 @@ class YOLOv11App extends xb.Script {
   }
 
   update() {
-    // Ensure the video has loaded frames and dimensions
+    // モデルが読み込まれるまでは推論をスキップ
+    if (!this.session) return;
+
+    // videoが十分なフレームデータを読み込んでいるか確認
     if (this.video.readyState >= 2 && this.video.videoWidth > 0 && this.video.videoHeight > 0) {
-      // Calculate crop parameters to fit the 16:9 or 4:3 video into a 1:1 square
+      // 16:9や4:3の映像を1:1の正方形にクロップするための計算
       const size = Math.min(this.video.videoWidth, this.video.videoHeight);
       const sx = (this.video.videoWidth - size) / 2;
       const sy = (this.video.videoHeight - size) / 2;
       
-      // Draw the cropped camera feed to the visible canvas
+      // 表示用キャンバスにクロップした映像を描画
       this.displayCtx.clearRect(0, 0, this.displaySize, this.displaySize);
       this.displayCtx.drawImage(
         this.video, 
@@ -160,25 +168,25 @@ class YOLOv11App extends xb.Script {
       
       this.drawBoxes();
       
-      // Notify Three.js that the canvas texture has been updated
+      // テクスチャの更新をThree.jsに通知
       this.displayTexture.needsUpdate = true;
       
-      // Request inference
+      // 推論をリクエスト
       this.runInference(sx, sy, size);
     }
   }
 
   drawBoxes() {
     for (const box of this.boxes) {
-      // Pick a distinct color based on class ID
+      // クラスIDに基づいて色を分ける
       const color = `hsl(${(box.classId * 45) % 360}, 100%, 50%)`;
       
-      // Draw Box
+      // ボックスを描画
       this.displayCtx.strokeStyle = color;
       this.displayCtx.lineWidth = 4;
       this.displayCtx.strokeRect(box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1);
       
-      // Draw Label Background
+      // ラベルの背景を描画
       const label = `${YOLO_CLASSES[box.classId]} ${(box.score * 100).toFixed(0)}%`;
       this.displayCtx.font = 'bold 20px Arial';
       this.displayCtx.fillStyle = color;
@@ -186,26 +194,27 @@ class YOLOv11App extends xb.Script {
       const textWidth = this.displayCtx.measureText(label).width;
       this.displayCtx.fillRect(box.x1, box.y1 - 25, textWidth + 10, 25);
       
-      // Draw Label Text
+      // ラベルの文字を描画
       this.displayCtx.fillStyle = '#000000';
       this.displayCtx.fillText(label, box.x1 + 5, box.y1 - 5);
     }
   }
 
   async runInference(sx, sy, size) {
+    // 既に推論中の場合やモデルが無い場合はスキップ
     if (this.isInferencing || !this.session) return;
     this.isInferencing = true;
     
     if (this.firstRun) {
-        this.statusText.setText('Warming up model (first run may be slow)...');
+        this.statusText.setText('Warming up model (first run is slow)...');
     }
 
     try {
-      // Draw frame to offscreen canvas for processing
+      // 処理用にオフスクリーンキャンバスへ描画
       this.offCtx.drawImage(this.video, sx, sy, size, size, 0, 0, this.displaySize, this.displaySize);
       const imgData = this.offCtx.getImageData(0, 0, this.displaySize, this.displaySize).data;
       
-      // Convert RGBA -> RGB, Normalize 0-1, and transpose to CHW format
+      // RGBAからRGBに変換し、0-1に正規化、そしてCHWフォーマットに並べ替え
       for (let i = 0; i < this.displaySize * this.displaySize; i++) {
         this.floatData[i] = imgData[i * 4] / 255.0; // R
         this.floatData[this.displaySize * this.displaySize + i] = imgData[i * 4 + 1] / 255.0; // G
@@ -215,7 +224,7 @@ class YOLOv11App extends xb.Script {
       const inputName = this.session.inputNames[0];
       const tensor = new ort.Tensor('float32', this.floatData, [1, 3, this.displaySize, this.displaySize]);
       
-      // Run ONNX Session
+      // ONNXセッションの実行
       const results = await this.session.run({ [inputName]: tensor });
       
       const outputName = this.session.outputNames[0];
@@ -233,7 +242,7 @@ class YOLOv11App extends xb.Script {
   }
 
   processOutput(data, dims) {
-    // YOLOv11 output is typically [batch, 84, 8400]
+    // YOLOv11の出力は通常 [batch, 84, 8400] (バッチ, [cx, cy, w, h, 80クラス], アンカー数)
     const numClasses = 80;
     const numAnchors = dims[2] || 8400;
     
@@ -242,7 +251,7 @@ class YOLOv11App extends xb.Script {
       let maxScore = 0;
       let classId = -1;
       
-      // Find the class with the highest probability
+      // 最も確率の高いクラスを探す
       for (let c = 0; c < numClasses; c++) {
         const score = data[(4 + c) * numAnchors + i];
         if (score > maxScore) {
@@ -251,7 +260,7 @@ class YOLOv11App extends xb.Script {
         }
       }
       
-      // Confidence threshold
+      // しきい値（Confidence threshold）によるフィルタリング
       if (maxScore > 0.25) {
         const cx = data[0 * numAnchors + i];
         const cy = data[1 * numAnchors + i];
@@ -269,6 +278,7 @@ class YOLOv11App extends xb.Script {
       }
     }
     
+    // NMS (Non-Maximum Suppression)で重複ボックスを削除
     this.boxes = this.nms(boxes, 0.45);
   }
 
@@ -294,7 +304,7 @@ class YOLOv11App extends xb.Script {
         const boxArea = (box.x2 - box.x1) * (box.y2 - box.y1);
         const iou = interArea / (currentArea + boxArea - interArea);
         
-        // Keep boxes with IoU less than threshold
+        // IoUがしきい値未満のボックスだけを残す
         return iou < iouThreshold;
       });
     }
@@ -308,17 +318,16 @@ document.addEventListener('DOMContentLoaded', async function () {
   options.enableCamera();
   options.setAppTitle('YOLOv11 Detector');
   
-  // Set up device camera specifically
   options.deviceCamera = new xb.DeviceCameraOptions({
     enabled: true,
     videoConstraints: {
       width: { ideal: 1280 },
       height: { ideal: 720 },
-      facingMode: 'environment', // Request back camera
+      facingMode: 'environment', // 背面カメラを要求
     },
   });
 
-  // Start simulated pose mode directly to view the floating HUD
+  // 起動時から仮想画面が見えるようにシミュレーターモードをPOSEに設定
   options.simulator.defaultMode = xb.SimulatorMode.POSE;
   
   xb.add(new YOLOv11App());
