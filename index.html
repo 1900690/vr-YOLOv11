@@ -1,161 +1,329 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Object Detection App (Boxer Style)</title>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            background-color: #f0f2f5;
-            color: #1c1e21;
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>YOLOv11 XR Object Detection | XR Blocks</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <link type="text/css" rel="stylesheet" href="https://xrblocks.github.io/css/xr.css" />
+    <script>
+      window.litDisableBundleWarning = true;
+    </script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.182.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.182.0/examples/jsm/",
+          "troika-three-text": "https://cdn.jsdelivr.net/gh/protectwise/troika@028b81cf308f0f22e5aa8e78196be56ec1997af5/packages/troika-three-text/src/index.js",
+          "troika-three-utils": "https://cdn.jsdelivr.net/gh/protectwise/troika@v0.52.4/packages/troika-three-utils/src/index.js",
+          "troika-worker-utils": "https://cdn.jsdelivr.net/gh/protectwise/troika@v0.52.4/packages/troika-worker-utils/src/index.js",
+          "bidi-js": "https://esm.sh/bidi-js@%5E1.0.2?target=es2022",
+          "webgl-sdf-generator": "https://esm.sh/webgl-sdf-generator@1.1.1/es2022/webgl-sdf-generator.mjs",
+          "lit": "https://cdn.jsdelivr.net/gh/lit/dist@3/core/lit-core.min.js",
+          "lit/": "https://esm.run/lit@3/",
+          "xrblocks": "https://cdn.jsdelivr.net/npm/xrblocks@0.11.0/build/xrblocks.js",
+          "xrblocks/addons/": "https://cdn.jsdelivr.net/npm/xrblocks@0.11.0/build/addons/",
+          "onnxruntime-web": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/ort.esm.min.js"
         }
-        header {
-            width: 100%;
-            padding: 20px;
-            background-color: #ffffff;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            text-align: center;
-            margin-bottom: 20px;
-        }
-        .container {
-            position: relative;
-            width: fit-content;
-            background: #000;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-        }
-        video, canvas {
-            display: block;
-        }
-        canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-        }
-        .controls {
-            margin-top: 20px;
-            display: flex;
-            gap: 10px;
-        }
-        button {
-            padding: 10px 20px;
-            font-size: 16px;
-            cursor: pointer;
-            border: none;
-            border-radius: 5px;
-            background-color: #1877f2;
-            color: white;
-            font-weight: bold;
-            transition: background 0.3s;
-        }
-        button:hover { background-color: #166fe5; }
-        button:disabled { background-color: #ccc; }
-        #status { margin-top: 10px; font-weight: bold; color: #65676b; }
-    </style>
-</head>
-<body>
+      }
+    </script>
+  </head>
 
-<header>
-    <h1>Boxer-lite: Object Detection</h1>
-    <p>ブラウザ上で動作するリアルタイム物体検出</p>
-</header>
+  <body>
+    <script type="module">
+import 'xrblocks/addons/simulator/SimulatorAddons.js';
+import * as THREE from 'three';
+import * as xb from 'xrblocks';
+import * as ort from 'onnxruntime-web';
 
-<div class="container">
-    <video id="webcam" autoplay playsinline muted width="640" height="480"></video>
-    <canvas id="overlay"></canvas>
-</div>
+// Ensure WebAssembly binaries can be found correctly via CDN
+ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/';
 
-<div class="controls">
-    <button id="startBtn">カメラ起動</button>
-</div>
-<div id="status">モデル読み込み中...</div>
+const YOLO_CLASSES = [
+  'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat',
+  'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat',
+  'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack',
+  'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball',
+  'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket',
+  'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple',
+  'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair',
+  'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote',
+  'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book',
+  'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush'
+];
 
-<script>
-    const video = document.getElementById('webcam');
-    const canvas = document.getElementById('overlay');
-    const status = document.getElementById('status');
-    const startBtn = document.getElementById('startBtn');
-    const ctx = canvas.getContext('2d');
+/**
+ * An XR Blocks app that renders a virtual heads-up display (HUD) showing
+ * the device camera feed overlaid with YOLOv11 ONNX object detection boxes.
+ */
+class YOLOv11App extends xb.Script {
+  constructor() {
+    super();
+    this.session = null;
+    this.isInferencing = false;
+    this.firstRun = true;
+    this.boxes = [];
+    this.displaySize = 640;
 
-    let model;
+    // Create an offscreen canvas for feeding the ONNX model
+    this.offscreenCanvas = document.createElement('canvas');
+    this.offscreenCanvas.width = this.displaySize;
+    this.offscreenCanvas.height = this.displaySize;
+    this.offCtx = this.offscreenCanvas.getContext('2d', { willReadFrequently: true });
 
-    // モデルのロード
-    async function loadModel() {
-        model = await cocoSsd.load();
-        status.innerText = "モデル読み込み完了！カメラを許可して開始してください。";
-    }
+    // Create a display canvas that serves as the texture for our HUD mesh
+    this.displayCanvas = document.createElement('canvas');
+    this.displayCanvas.width = this.displaySize;
+    this.displayCanvas.height = this.displaySize;
+    this.displayCtx = this.displayCanvas.getContext('2d');
+    
+    this.displayTexture = new THREE.CanvasTexture(this.displayCanvas);
+    this.displayTexture.colorSpace = THREE.SRGBColorSpace;
 
-    // カメラのセットアップ
-    async function setupWebcam() {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { width: 640, height: 480 },
-                audio: false
-            });
-            video.srcObject = stream;
-            return new Promise((resolve) => {
-                video.onloadedmetadata = () => {
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                    resolve();
-                };
-            });
-        } catch (e) {
-            status.innerText = "エラー: カメラにアクセスできません。";
-            console.error(e);
-        }
-    }
+    // Create a hidden video element to capture the camera stream
+    this.video = document.createElement('video');
+    this.video.setAttribute('autoplay', '');
+    this.video.setAttribute('muted', '');
+    this.video.setAttribute('playsinline', '');
+    this.video.style.display = 'none';
+    document.body.appendChild(this.video);
 
-    // 検出ループ
-    async function detectFrame() {
-        const predictions = await model.detect(video);
-        
-        // 描画のクリア
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        // 結果の描画 (Boxer風のスタイル)
-        predictions.forEach(prediction => {
-            const [x, y, width, height] = prediction.bbox;
-            const label = prediction.class;
-            const score = (prediction.score * 100).toFixed(1);
+    // Preallocate Float32Array to avoid constant garbage collection
+    this.floatData = new Float32Array(3 * this.displaySize * this.displaySize);
+  }
 
-            // 枠の描画
-            ctx.strokeStyle = '#00FF00';
-            ctx.lineWidth = 3;
-            ctx.strokeRect(x, y, width, height);
+  async init() {
+    this.add(new THREE.HemisphereLight(0xffffff, 0x666666, 3));
 
-            // ラベルの背景描画
-            ctx.fillStyle = '#00FF00';
-            const textWidth = ctx.measureText(`${label} ${score}%`).width;
-            ctx.fillRect(x, y - 25, textWidth + 10, 25);
+    // Create a spatial panel for displaying status updates
+    this.panel = new xb.SpatialPanel({
+      width: 1.5,
+      height: 0.2,
+      backgroundColor: '#2b2b2baa',
+      useDefaultPosition: false,
+    });
+    this.panel.position.set(0, 2.05, -1.5);
+    this.add(this.panel);
 
-            // テキストの描画
-            ctx.fillStyle = '#000000';
-            ctx.font = '18px sans-serif';
-            ctx.fillText(`${label} ${score}%`, x + 5, y - 7);
-        });
-
-        requestAnimationFrame(detectFrame);
-    }
-
-    startBtn.addEventListener('click', async () => {
-        startBtn.disabled = true;
-        status.innerText = "カメラ起動中...";
-        await setupWebcam();
-        status.innerText = "検出中...";
-        detectFrame();
+    const grid = this.panel.addGrid();
+    this.statusText = grid.addRow().addText({
+      text: 'Initializing Camera...',
+      fontColor: '#00ff00',
+      fontSize: 0.08,
     });
 
-    loadModel();
-</script>
+    // Create the HUD screen displaying the camera and bounding boxes
+    const geometry = new THREE.PlaneGeometry(1.5, 1.5);
+    const material = new THREE.MeshBasicMaterial({ 
+        map: this.displayTexture, 
+        side: THREE.DoubleSide 
+    });
+    this.displayMesh = new THREE.Mesh(geometry, material);
+    this.displayMesh.position.set(0, 1.2, -1.5);
+    this.add(this.displayMesh);
 
-</body>
+    // Connect the XR Blocks camera stream to our video element
+    this.cameraStream = xb.core.deviceCamera;
+    this.cameraStream.addEventListener('statechange', (event) => {
+      if (event.state === 'streaming') {
+        this.video.srcObject = this.cameraStream.stream;
+        this.video.play().catch(e => console.warn('Video play blocked:', e));
+      }
+    });
+
+    // Load the ONNX model uploaded by the user
+    try {
+      this.statusText.setText('Loading YOLOv11 ONNX model...');
+      this.session = await ort.InferenceSession.create('./yolo11n.onnx', { 
+        executionProviders: ['wasm'] 
+      });
+      this.statusText.setText('Model Ready! Waiting for frames...');
+    } catch (error) {
+      console.error('Model load error:', error);
+      this.statusText.setText('Failed to load ONNX model.');
+    }
+  }
+
+  update() {
+    // Ensure the video has loaded frames and dimensions
+    if (this.video.readyState >= 2 && this.video.videoWidth > 0 && this.video.videoHeight > 0) {
+      // Calculate crop parameters to fit the 16:9 or 4:3 video into a 1:1 square
+      const size = Math.min(this.video.videoWidth, this.video.videoHeight);
+      const sx = (this.video.videoWidth - size) / 2;
+      const sy = (this.video.videoHeight - size) / 2;
+      
+      // Draw the cropped camera feed to the visible canvas
+      this.displayCtx.clearRect(0, 0, this.displaySize, this.displaySize);
+      this.displayCtx.drawImage(
+        this.video, 
+        sx, sy, size, size, 
+        0, 0, this.displaySize, this.displaySize
+      );
+      
+      this.drawBoxes();
+      
+      // Notify Three.js that the canvas texture has been updated
+      this.displayTexture.needsUpdate = true;
+      
+      // Request inference
+      this.runInference(sx, sy, size);
+    }
+  }
+
+  drawBoxes() {
+    for (const box of this.boxes) {
+      // Pick a distinct color based on class ID
+      const color = `hsl(${(box.classId * 45) % 360}, 100%, 50%)`;
+      
+      // Draw Box
+      this.displayCtx.strokeStyle = color;
+      this.displayCtx.lineWidth = 4;
+      this.displayCtx.strokeRect(box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1);
+      
+      // Draw Label Background
+      const label = `${YOLO_CLASSES[box.classId]} ${(box.score * 100).toFixed(0)}%`;
+      this.displayCtx.font = 'bold 20px Arial';
+      this.displayCtx.fillStyle = color;
+      
+      const textWidth = this.displayCtx.measureText(label).width;
+      this.displayCtx.fillRect(box.x1, box.y1 - 25, textWidth + 10, 25);
+      
+      // Draw Label Text
+      this.displayCtx.fillStyle = '#000000';
+      this.displayCtx.fillText(label, box.x1 + 5, box.y1 - 5);
+    }
+  }
+
+  async runInference(sx, sy, size) {
+    if (this.isInferencing || !this.session) return;
+    this.isInferencing = true;
+    
+    if (this.firstRun) {
+        this.statusText.setText('Warming up model (first run may be slow)...');
+    }
+
+    try {
+      // Draw frame to offscreen canvas for processing
+      this.offCtx.drawImage(this.video, sx, sy, size, size, 0, 0, this.displaySize, this.displaySize);
+      const imgData = this.offCtx.getImageData(0, 0, this.displaySize, this.displaySize).data;
+      
+      // Convert RGBA -> RGB, Normalize 0-1, and transpose to CHW format
+      for (let i = 0; i < this.displaySize * this.displaySize; i++) {
+        this.floatData[i] = imgData[i * 4] / 255.0; // R
+        this.floatData[this.displaySize * this.displaySize + i] = imgData[i * 4 + 1] / 255.0; // G
+        this.floatData[2 * this.displaySize * this.displaySize + i] = imgData[i * 4 + 2] / 255.0; // B
+      }
+      
+      const inputName = this.session.inputNames[0];
+      const tensor = new ort.Tensor('float32', this.floatData, [1, 3, this.displaySize, this.displaySize]);
+      
+      // Run ONNX Session
+      const results = await this.session.run({ [inputName]: tensor });
+      
+      const outputName = this.session.outputNames[0];
+      this.processOutput(results[outputName].data, results[outputName].dims);
+
+      if (this.firstRun) {
+          this.firstRun = false;
+          this.statusText.setText('YOLOv11 Detecting...');
+      }
+    } catch (e) {
+      console.error('Inference error:', e);
+    } finally {
+      this.isInferencing = false;
+    }
+  }
+
+  processOutput(data, dims) {
+    // YOLOv11 output is typically [batch, 84, 8400]
+    const numClasses = 80;
+    const numAnchors = dims[2] || 8400;
+    
+    let boxes = [];
+    for (let i = 0; i < numAnchors; i++) {
+      let maxScore = 0;
+      let classId = -1;
+      
+      // Find the class with the highest probability
+      for (let c = 0; c < numClasses; c++) {
+        const score = data[(4 + c) * numAnchors + i];
+        if (score > maxScore) {
+          maxScore = score;
+          classId = c;
+        }
+      }
+      
+      // Confidence threshold
+      if (maxScore > 0.25) {
+        const cx = data[0 * numAnchors + i];
+        const cy = data[1 * numAnchors + i];
+        const w = data[2 * numAnchors + i];
+        const h = data[3 * numAnchors + i];
+        
+        boxes.push({
+          x1: cx - w / 2,
+          y1: cy - h / 2,
+          x2: cx + w / 2,
+          y2: cy + h / 2,
+          score: maxScore,
+          classId: classId
+        });
+      }
+    }
+    
+    this.boxes = this.nms(boxes, 0.45);
+  }
+
+  nms(boxes, iouThreshold) {
+    boxes.sort((a, b) => b.score - a.score);
+    const result = [];
+    
+    while (boxes.length > 0) {
+      const current = boxes.shift();
+      result.push(current);
+      
+      boxes = boxes.filter(box => {
+        const xA = Math.max(current.x1, box.x1);
+        const yA = Math.max(current.y1, box.y1);
+        const xB = Math.min(current.x2, box.x2);
+        const yB = Math.min(current.y2, box.y2);
+        
+        const interW = Math.max(0, xB - xA);
+        const interH = Math.max(0, yB - yA);
+        const interArea = interW * interH;
+        
+        const currentArea = (current.x2 - current.x1) * (current.y2 - current.y1);
+        const boxArea = (box.x2 - box.x1) * (box.y2 - box.y1);
+        const iou = interArea / (currentArea + boxArea - interArea);
+        
+        // Keep boxes with IoU less than threshold
+        return iou < iouThreshold;
+      });
+    }
+    return result;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', async function () {
+  const options = new xb.Options();
+  options.enableUI();
+  options.enableCamera();
+  options.setAppTitle('YOLOv11 Detector');
+  
+  // Set up device camera specifically
+  options.deviceCamera = new xb.DeviceCameraOptions({
+    enabled: true,
+    videoConstraints: {
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+      facingMode: 'environment', // Request back camera
+    },
+  });
+
+  // Start simulated pose mode directly to view the floating HUD
+  options.simulator.defaultMode = xb.SimulatorMode.POSE;
+  
+  xb.add(new YOLOv11App());
+  await xb.init(options);
+});
+    </script>
+  </body>
 </html>
